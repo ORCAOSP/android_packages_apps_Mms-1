@@ -181,14 +181,13 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
-import java.util.Set;
 
 /**
  * This is the main UI for:
@@ -218,9 +217,7 @@ public class ComposeMessageActivity extends Activity
     public static final int REQUEST_CODE_ADD_CONTACT      = 108;
     public static final int REQUEST_CODE_PICK             = 109;
     public static final int REQUEST_CODE_INSERT_CONTACT_INFO = 110;
-    public static final int REQUEST_CODE_ATTACH_ADD_CONTACT_INFO     = 111;
-    public static final int REQUEST_CODE_ATTACH_ADD_CONTACT_VCARD    = 112;
-    public static final int REQUEST_CODE_ATTACH_REPLACE_CONTACT_INFO = 113;
+    public static final int REQUEST_CODE_ADD_RECIPIENTS   = 111;
 
     private static final String TAG = "Mms/compose";
 
@@ -339,6 +336,7 @@ public class ComposeMessageActivity extends Activity
 
     private RecipientsEditor mRecipientsEditor;  // UI control for editing recipients
     private ImageButton mRecipientsPicker;       // UI control for recipients picker
+    private ImageButton mRecipientsSelector;     // UI control for recipients selector
 
     // For HW keyboard, 'mIsKeyboardOpen' indicates if the HW keyboard is open.
     // For SW keyboard, 'mIsKeyboardOpen' should always be true.
@@ -439,15 +437,6 @@ public class ComposeMessageActivity extends Activity
 
     private boolean isLocked = false;
 
-    private boolean mIsPickingContact = false;
-    // List for contacts picked from People.
-    private ContactList mRecipientsPickList = null;
-    /**
-    * Whether the recipients is picked from Contacts
-    */
-    private boolean mIsProcessPickedRecipients = false;
-    private int mExistsRecipientsCount = 0;
-
     /**
      * Whether the audio attachment player activity is launched and running
      */
@@ -492,12 +481,6 @@ public class ComposeMessageActivity extends Activity
         }, R.string.building_slideshow_title);
     }
 
-    private void pickContacts(int mode, int requestCode) {
-        Intent intent = new Intent(this, MultiPickContactsActivity.class);
-        intent.putExtra(MultiPickContactsActivity.MODE, mode);
-        startActivityForResult(intent, requestCode);
-    }
-
     private final Handler mAttachmentEditorHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
@@ -516,16 +499,12 @@ public class ComposeMessageActivity extends Activity
                 case AttachmentEditor.MSG_PLAY_VIDEO:
                 case AttachmentEditor.MSG_PLAY_AUDIO:
                 case AttachmentEditor.MSG_PLAY_SLIDESHOW:
-                case AttachmentEditor.MSG_VIEW_VCARD:
-                    if (mWorkingMessage.getSlideshow() != null) {
-                         viewMmsMessageAttachment(msg.what);
-                    }
+                    viewMmsMessageAttachment(msg.what);
                     break;
 
                 case AttachmentEditor.MSG_REPLACE_IMAGE:
                 case AttachmentEditor.MSG_REPLACE_VIDEO:
                 case AttachmentEditor.MSG_REPLACE_AUDIO:
-                case AttachmentEditor.MSG_REPLACE_VCARD:
                     showAddAttachmentDialog(true);
                     break;
 
@@ -616,7 +595,6 @@ public class ComposeMessageActivity extends Activity
                             case WorkingMessage.IMAGE:
                             case WorkingMessage.VIDEO:
                             case WorkingMessage.AUDIO:
-                            case WorkingMessage.VCARD:
                             case WorkingMessage.SLIDESHOW:
                                 MessageUtils.viewMmsMessageAttachment(ComposeMessageActivity.this,
                                         msgItem.mMessageUri, msgItem.mSlideshow,
@@ -927,43 +905,28 @@ public class ComposeMessageActivity extends Activity
                 return;
             }
 
-            mWorkingMessage.setWorkingRecipients(mRecipientsEditor.getNumbers());
+            List<String> numbers = mRecipientsEditor.getNumbers();
+            mWorkingMessage.setWorkingRecipients(numbers);
+            boolean multiRecipients = numbers != null && numbers.size() > 1;
+            mMsgListAdapter.setIsGroupConversation(multiRecipients);
+            mWorkingMessage.setHasMultipleRecipients(multiRecipients, true);
             mWorkingMessage.setHasEmail(mRecipientsEditor.containsEmail(), true);
 
             checkForTooManyRecipients();
 
-            // if is pick recipients from Contacts,
-            // then only update title once when process finished
-            if (mIsProcessPickedRecipients) {
-                 return;
-            }
+            // Walk backwards in the text box, skipping spaces.  If the last
+            // character is a comma, update the title bar.
+            for (int pos = s.length() - 1; pos >= 0; pos--) {
+                char c = s.charAt(pos);
+                if (c == ' ')
+                    continue;
 
-            if (mRecipientsPickList != null) {
-                // Update UI with mRecipientsPickList, which is picked from
-                // People.
-                updateTitle(mRecipientsPickList);
-                mRecipientsPickList = null;
-            } else {
-                // If we have gone to zero recipients, we need to update the title.
-                if (0 == s.length()) {
+                if (c == ',') {
                     ContactList contacts = mRecipientsEditor.constructContactsFromInput(false);
                     updateTitle(contacts);
                 }
 
-                // Walk backwards in the text box, skipping spaces. If the last
-                // character is a comma, update the title bar.
-                for (int pos = s.length() - 1; pos >= 0; pos--) {
-                    char c = s.charAt(pos);
-                    if (c == ' ') continue;
-
-                    if (c == ',') {
-                        ContactList contacts = mRecipientsEditor
-                                .constructContactsFromInput(false);
-                        updateTitle(contacts);
-                    }
-
-                    break;
-                }
+                break;
             }
 
             // If we have gone to zero recipients, disable send button.
@@ -1022,10 +985,6 @@ public class ComposeMessageActivity extends Activity
 
         @Override
         public boolean onMenuItemClick(MenuItem item) {
-            if (null == mRecipient) {
-                return false;
-            }
-
             switch (item.getItemId()) {
                 // Context menu handlers for the recipients editor.
                 case MENU_VIEW_CONTACT: {
@@ -1302,7 +1261,6 @@ public class ComposeMessageActivity extends Activity
                         break;
                     case WorkingMessage.VIDEO:
                     case WorkingMessage.IMAGE:
-                    case WorkingMessage.VCARD:
                         if (haveSomethingToCopyToSDCard(msgItem.mMsgId)) {
                             menu.add(0, MENU_COPY_TO_SDCARD, 0, R.string.copy_to_sdcard)
                             .setOnMenuItemClickListener(l);
@@ -1700,8 +1658,7 @@ public class ComposeMessageActivity extends Activity
 
             if (ContentType.isImageType(type) || ContentType.isVideoType(type) ||
                     ContentType.isAudioType(type) || DrmUtils.isDrmType(type)
-                    || type.toLowerCase().equals(ContentType.AUDIO_OGG.toLowerCase())
-                    || type.toLowerCase().equals(ContentType.TEXT_VCARD.toLowerCase())) {
+                    || type.toLowerCase().equals(ContentType.AUDIO_OGG.toLowerCase())) {
                 result = true;
                 break;
             }
@@ -1857,7 +1814,6 @@ public class ComposeMessageActivity extends Activity
         if (!ContentType.isImageType(type)
                 && !ContentType.isVideoType(type)
                 && !ContentType.isAudioType(type)
-                && !(ContentType.TEXT_VCARD.toLowerCase().equals(type.toLowerCase()))
                 && !(ContentType.AUDIO_OGG.toLowerCase().equals(type.toLowerCase()))) {
             return true;    // we only save pictures, videos, and sounds. Skip the text parts,
                             // the app (smil) parts, and other type that we can't handle.
@@ -2055,8 +2011,6 @@ public class ComposeMessageActivity extends Activity
         }
         mDebugRecipients = list.serialize();
 
-        // the cnt is already be added recipients count
-        mExistsRecipientsCount = cnt;
         ActionBar actionBar = getActionBar();
         actionBar.setTitle(title);
         actionBar.setSubtitle(subTitle);
@@ -2076,13 +2030,17 @@ public class ComposeMessageActivity extends Activity
             View stubView = stub.inflate();
             mRecipientsEditor = (RecipientsEditor) stubView.findViewById(R.id.recipients_editor);
             mRecipientsPicker = (ImageButton) stubView.findViewById(R.id.recipients_picker);
+            mRecipientsSelector = (ImageButton) stubView.findViewById(R.id.recipients_selector);
+            mRecipientsSelector.setVisibility(View.VISIBLE);
         } else {
             mRecipientsEditor = (RecipientsEditor)findViewById(R.id.recipients_editor);
             mRecipientsEditor.setVisibility(View.VISIBLE);
             mRecipientsPicker = (ImageButton)findViewById(R.id.recipients_picker);
-            mRecipientsPicker.setVisibility(View.VISIBLE);
+            mRecipientsSelector = (ImageButton)findViewById(R.id.recipients_selector);
+            mRecipientsSelector.setVisibility(View.VISIBLE);
         }
         mRecipientsPicker.setOnClickListener(this);
+        mRecipientsSelector.setOnClickListener(this);
 
         mRecipientsEditor.setAdapter(new ChipsRecipientAdapter(this));
         mRecipientsEditor.populate(recipients);
@@ -2587,7 +2545,6 @@ public class ComposeMessageActivity extends Activity
         //      there is out of our control.
         //Contact.startPresenceObserver();
 
-        mIsPickingContact = false;
         addRecipientsListeners();
 
         if (Log.isLoggable(LogTag.APP, Log.VERBOSE)) {
@@ -2864,9 +2821,6 @@ public class ComposeMessageActivity extends Activity
         if (mRecipientsEditor != null) {
             mRecipientsEditor.removeTextChangedListener(mRecipientsWatcher);
             mRecipientsEditor.setVisibility(View.GONE);
-            if (mRecipientsPicker != null) {
-                mRecipientsPicker.setVisibility(View.GONE);
-            }
             hideOrShowTopPanel();
         }
     }
@@ -3318,17 +3272,6 @@ public class ComposeMessageActivity extends Activity
                 editSlideshow();
                 break;
 
-            case AttachmentTypeSelectorAdapter.ADD_CONTACT_AS_TEXT:
-                pickContacts(MultiPickContactsActivity.MODE_INFO,
-                        replace ? REQUEST_CODE_ATTACH_REPLACE_CONTACT_INFO
-                                : REQUEST_CODE_ATTACH_ADD_CONTACT_INFO);
-                break;
-
-            case AttachmentTypeSelectorAdapter.ADD_CONTACT_AS_VCARD:
-                pickContacts(MultiPickContactsActivity.MODE_VCARD,
-                        REQUEST_CODE_ATTACH_ADD_CONTACT_VCARD);
-                break;
-
             default:
                 break;
         }
@@ -3506,40 +3449,27 @@ public class ComposeMessageActivity extends Activity
                 showContactInfoDialog(data.getData());
                 break;
 
-            case REQUEST_CODE_ATTACH_REPLACE_CONTACT_INFO:
-                // Caused by user choose to replace the attachment, so we need remove
-                // the attachment and then add the contact info to text.
-                if (data != null) {
-                    mWorkingMessage.removeAttachment(true);
-                }
-            case REQUEST_CODE_ATTACH_ADD_CONTACT_INFO:
-                if (data != null) {
-                    String newText = mWorkingMessage.getText() +
-                        data.getStringExtra(MultiPickContactsActivity.EXTRA_INFO);
-                    mWorkingMessage.setText(newText);
-                }
-                break;
-
-            case REQUEST_CODE_ATTACH_ADD_CONTACT_VCARD:
-                if (data != null) {
-                    // In a case that a draft message has an attachment whose type is slideshow,
-                    // then reopen it and replace the attachment through attach icon, we have to
-                    // remove the old attachement silently first.
-                    if (mWorkingMessage != null) {
-                        mWorkingMessage.removeAttachment(false);
-                    }
-                    String extraVCard = data.getStringExtra(MultiPickContactsActivity.EXTRA_VCARD);
-                    if (extraVCard != null) {
-                        Uri vcard = Uri.parse(extraVCard);
-                        addVcard(vcard);
-                    }
-                }
+            case REQUEST_CODE_ADD_RECIPIENTS:
+                insertNumbersIntoRecipientsEditor(
+                        data.getStringArrayListExtra(SelectRecipientsList.EXTRA_RECIPIENTS));
                 break;
 
             default:
                 if (LogTag.VERBOSE) log("bail due to unknown requestCode=" + requestCode);
                 break;
         }
+    }
+
+    private void insertNumbersIntoRecipientsEditor(final ArrayList<String> numbers) {
+        ContactList list = ContactList.getByNumbers(numbers, true);
+        ContactList existing = mRecipientsEditor.constructContactsFromInput(true);
+        for (Contact contact : existing) {
+            if (!contact.existsInDatabase()) {
+                list.add(contact);
+            }
+        }
+        mRecipientsEditor.setText(null);
+        mRecipientsEditor.populate(list);
     }
 
     /**
@@ -3556,42 +3486,20 @@ public class ComposeMessageActivity extends Activity
     private void processPickResult(final Intent data) {
         // The EXTRA_PHONE_URIS stores the phone's urls that were selected by user in the
         // multiple phone picker.
-        Bundle bundle = data.getExtras().getBundle("result");
-        final Set<String> keySet = bundle.keySet();
-        final int recipientCount = (keySet != null) ? keySet.size() : 0;
+        final Parcelable[] uris =
+            data.getParcelableArrayExtra(Intents.EXTRA_PHONE_URIS);
 
-        // if total recipients count > recipientLimit,
-        // then forbid add reipients to RecipientsEditor
+        final int recipientCount = uris != null ? uris.length : 0;
+
         final int recipientLimit = MmsConfig.getRecipientLimit();
-        int totalRecipientsCount = mExistsRecipientsCount + recipientCount;
-        if (recipientLimit != Integer.MAX_VALUE && totalRecipientsCount > recipientLimit) {
+        if (recipientLimit != Integer.MAX_VALUE && recipientCount > recipientLimit) {
             new AlertDialog.Builder(this)
-                    .setMessage(getString(R.string.too_many_recipients, totalRecipientsCount,
-                            recipientLimit))
-                    .setPositiveButton(android.R.string.ok, new OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialog, int which) {
-                            // if already exists some recipients,
-                            // then new pick recipients with exists recipients count
-                            // can't more than recipient limit count.
-                            int newPickRecipientsCount = recipientLimit - mExistsRecipientsCount;
-                            if (newPickRecipientsCount <= 0) {
-                                return;
-                            }
-                            processAddRecipients(keySet, newPickRecipientsCount);
-                        }
-                    })
-                    .setNegativeButton(android.R.string.cancel, null)
+                    .setMessage(getString(R.string.too_many_recipients, recipientCount, recipientLimit))
+                    .setPositiveButton(android.R.string.ok, null)
                     .create().show();
             return;
         }
 
-        processAddRecipients(keySet, recipientCount);
-    }
-
-    private void processAddRecipients(final Set<String> keySet, final int newPickRecipientsCount) {
-        // if process pick result that is pick recipients from Contacts
-        mIsProcessPickedRecipients = true;
         final Handler handler = new Handler();
         final ProgressDialog progressDialog = new ProgressDialog(this);
         progressDialog.setTitle(getText(R.string.pick_too_many_recipients));
@@ -3612,60 +3520,20 @@ public class ComposeMessageActivity extends Activity
         new Thread(new Runnable() {
             @Override
             public void run() {
-                Uri[] newuris = new Uri[newPickRecipientsCount];
                 final ContactList list;
                  try {
-                    Iterator<String> it = keySet.iterator();
-                    int i = 0;
-                    while (it.hasNext()) {
-                        String id = it.next();
-                        newuris[i++] = ContentUris.withAppendedId(Phone.CONTENT_URI,
-                                Integer.parseInt(id));
-                        if (i == newPickRecipientsCount) {
-                            break;
-                        }
-                    }
-                    list = ContactList.blockingGetByUris(newuris);
+                    list = ContactList.blockingGetByUris(uris);
                 } finally {
                     handler.removeCallbacks(showProgress);
+                    progressDialog.dismiss();
                 }
-                if (mRecipientsEditor != null) {
-                    ContactList exsitList = mRecipientsEditor.constructContactsFromInput(true);
-                    // Remove the repeat recipients.
-                  if(exsitList.equals(list)){
-                    exsitList.clear();
-                    list.addAll(0, exsitList);
-                  }else{
-                    list.removeAll(exsitList);
-                    list.addAll(0, exsitList);
-                     }
-                }
-
                 // TODO: there is already code to update the contact header widget and recipients
                 // editor if the contacts change. we can re-use that code.
                 final Runnable populateWorker = new Runnable() {
                     @Override
                     public void run() {
-                        // We must remove this listener before dealing with the contact list.
-                        // Because the listener will take a lot of time, this will cause an ANR.
-                        mRecipientsEditor.removeTextChangedListener(mRecipientsWatcher);
                         mRecipientsEditor.populate(list);
-                        // Set value for mRecipientsPickList and
-                        // mRecipientsWatcher will update the UI.
-                        mRecipientsPickList = list;
                         updateTitle(list);
-                        // When we finish dealing with the conatct list, the
-                        // RecipientsEditor will post the runnable "postHandlePendingChips"
-                        // to the message queue, then we add the TextChangedListener.
-                        // The mRecipientsWatcher will be call while UI thread deal
-                        // with the "postHandlePendingChips" runnable.
-                        mRecipientsEditor.addTextChangedListener(mRecipientsWatcher);
-
-                        // if process finished, then dismiss the progress dialog
-                        progressDialog.dismiss();
-
-                        // if populate finished, then recipients pick process end
-                        mIsProcessPickedRecipients = false;
                     }
                 };
                 handler.post(populateWorker);
@@ -3802,11 +3670,6 @@ public class ComposeMessageActivity extends Activity
         handleAddAttachmentError(result, R.string.type_audio);
     }
 
-    private void addVcard(Uri uri) {
-        int result = mWorkingMessage.setAttachment(WorkingMessage.VCARD, uri, false);
-        handleAddAttachmentError(result, R.string.type_vcard);
-    }
-
     AsyncDialog getAsyncDialog() {
         if (mAsyncDialog == null) {
             mAsyncDialog = new AsyncDialog(this);
@@ -3934,10 +3797,6 @@ public class ComposeMessageActivity extends Activity
                     || (wildcard && uri.toString().startsWith(mVideoUri))
                     || (wildcard && isVideoFile(uri))) {
                 addVideo(uri, append);
-            } else if (SystemProperties.getBoolean("persist.env.mms.vcard", true)
-                    && (type.equals("text/x-vcard")
-                    || (wildcard && isVcardFile(uri)))) {
-                addVcard(uri);
             } else {
                 // Add prompt when file type is not image/video/audio.
                 Message msg = Message.obtain(mAddAttachmentHandler,
@@ -4058,41 +3917,36 @@ public class ComposeMessageActivity extends Activity
     public void onClick(View v) {
         if ((v == mSendButtonSms || v == mSendButtonMms) && isPreparedForSending()) {
             confirmSendMessageIfNeeded();
-        } else if ((v == mRecipientsPicker)) {
+        } else if (v == mRecipientsPicker) {
             launchMultiplePhonePicker();
-        }
-        else if((v == mQuickEmoji)) {
+        } else if (v == mQuickEmoji) {
             showEmojiDialog();
+        } else if (v == mRecipientsSelector) {
+            Intent intent = new Intent(ComposeMessageActivity.this, SelectRecipientsList.class);
+            ContactList contacts = mRecipientsEditor.constructContactsFromInput(false);
+            intent.putExtra(SelectRecipientsList.EXTRA_RECIPIENTS, contacts.getNumbers());
+            startActivityForResult(intent, REQUEST_CODE_ADD_RECIPIENTS);
         }
     }
 
     private void launchMultiplePhonePicker() {
-        Intent intent = new Intent("com.android.contacts.action.MULTI_PICK",Contacts.CONTENT_URI);
-        String exsitNumbers = mRecipientsEditor.getExsitNumbers();
-        if (!TextUtils.isEmpty(exsitNumbers)) {
-            intent.putExtra(Intents.EXTRA_PHONE_URIS, exsitNumbers);
-        }
+        Intent intent = new Intent(Intents.ACTION_GET_MULTIPLE_PHONES);
+        intent.addCategory("android.intent.category.DEFAULT");
+        intent.setType(Phone.CONTENT_TYPE);
         // We have to wait for the constructing complete.
-        /*ContactList contacts = mRecipientsEditor.constructContactsFromInput(true);
-        int recipientsCount = 0;
+        ContactList contacts = mRecipientsEditor.constructContactsFromInput(true);
         int urisCount = 0;
         Uri[] uris = new Uri[contacts.size()];
         urisCount = 0;
         for (Contact contact : contacts) {
             if (Contact.CONTACT_METHOD_TYPE_PHONE == contact.getContactMethodType()) {
-                    uris[urisCount++] = contact.getPhoneUri();
+                    uris[urisCount++] = contact.getPhoneUri(false);
             }
         }
         if (urisCount > 0) {
             intent.putExtra(Intents.EXTRA_PHONE_URIS, uris);
-        }*/
-        // Catch the ActivityNotFound exception when Contack app is disabled.
-        try {
-            mIsPickingContact = true;
-            startActivityForResult(intent, REQUEST_CODE_PICK);
-        } catch (ActivityNotFoundException ex) {
-            Toast.makeText(this, R.string.contact_app_not_found, Toast.LENGTH_SHORT).show();
         }
+        startActivityForResult(intent, REQUEST_CODE_PICK);
     }
 
     @Override
@@ -5465,12 +5319,5 @@ public class ComposeMessageActivity extends Activity
                 return builder.create();
         }
         return super.onCreateDialog(id, args);
-    }
-
-    // Get the path of uri and compare it to ".vcf" to judge whether it is a
-    // vcard file.
-    private boolean isVcardFile(Uri uri) {
-        String path = uri.getPath();
-        return null != path && path.toLowerCase().endsWith(".vcf");
     }
 }

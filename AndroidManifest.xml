@@ -149,15 +149,6 @@
            </intent-filter>
         </activity>
 
-        <activity-alias android:name=".ui.ShareVCardActivity"
-            android:targetActivity=".ui.ComposeMessageActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/x-vcard" />
-            </intent-filter>
-        </activity-alias>
-
         <activity-alias android:name=".ui.ForwardMessageActivity"
                   android:targetActivity=".ui.ComposeMessageActivity"
                   android:configChanges="orientation|screenSize|keyboardHidden"
@@ -192,6 +183,12 @@
         <activity android:name=".ui.SlideshowEditActivity"
             android:theme="@style/MmsHoloTheme"
             android:label="@string/edit_slideshow_activity" />
+
+        <activity android:name=".ui.SelectRecipientsList"
+            android:theme="@style/MmsHoloTheme"
+            android:label="@string/select_recipients"
+            android:parentActivityName=".ui.ComposeMessageActivity">
+        </activity>
 
         <activity android:name=".ui.RecipientListActivity"
             android:theme="@style/MmsHoloTheme"
@@ -386,11 +383,6 @@
             android:name=".templates.TemplatesListActivity"
             android:theme="@style/MmsHoloTheme"
             android:label="@string/template_list_title" >
-        </activity>
-
-        <activity android:name=".ui.MultiPickContactsActivity"
-                  android:windowSoftInputMode="stateHidden|adjustResize"
-                  android:configChanges="orientation|keyboardHidden|screenSize" >
         </activity>
 
         <activity android:name=".templates.TemplateEditor"
